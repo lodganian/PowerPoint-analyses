@@ -47,16 +47,27 @@ class pptxXmlAnalysis{
         $analysText = $this->testFontsText($samplePptx, $analysPptx);
         $cmpShapes = $this->compareShapes($samplePptx, $analysPptx);
         $cmpLayouts = $this->compareLayout($samplePptx, $analysPptx);
-        system('python test.py '.$pathToSamplePPTX.' '.$pathToTestedPPTX, $scored);
-        system('python test.py '.$pathToSamplePPTX.' '.$pathToSamplePPTX, $max);
-        $scored += $cmpShapes[0] + $cmpSlides[0] + $analysText[0] + $cmpLayouts[0];
-        $max += $cmpShapes[1] + $cmpSlides[1] + $analysText[1] + $cmpLayouts[1];
+        $cmpParagraphs = $this->compareParagraphsBullets($samplePptx, $analysPptx);
+        $max = 0;
+        $scored = 0;
+        if(system("python --version")){
+            system('python test.py '.$pathToSamplePPTX.' '.$pathToTestedPPTX, $scored);
+            system('python test.py '.$pathToSamplePPTX.' '.$pathToSamplePPTX, $max);
+        }
+
+        $scored += $cmpShapes[0] + $cmpSlides[0] + $analysText[0] + $cmpLayouts[0] + $cmpParagraphs[0];
+        $max += $cmpShapes[1] + $cmpSlides[1] + $analysText[1] + $cmpLayouts[1] +  $cmpParagraphs[1];
         if($max == 0){
             return 1;
         }
         return $scored/$max;
     }
 
+    /*
+     *function to get array of slides from pptx presentation
+     * @params: $pptx -- presentation
+     * @return -- array<int, Slides>, when each key of array is slide index
+     */
     private function getSlidesArray($pptx){
         $slides = array();
         foreach($pptx->getAllSlides() as $slide){
@@ -65,6 +76,11 @@ class pptxXmlAnalysis{
         return $slides;
     }
 
+    /*
+     * Function to compare slide Layouts from pptx
+     * @params: $sample_pptx - sample presentation, with sample layouts
+     * $tested_pptx -- tested presentation, which compared with sample_pptx
+     */
     private function compareLayout($sample_pptx, $tested_pptx){
         $sample_slides = $this->getSlidesArray($sample_pptx);
         $tested_slides = $this->getSlidesArray($tested_pptx);
@@ -78,7 +94,12 @@ class pptxXmlAnalysis{
 
     }
 
-    //Подсчет слайдов. Возврящается количество слайдов
+    /*
+     * Function to get array of int in (min,max) format
+     * @params: $sample_pptx -- sample presentation
+     * $tested_pptx -- tested presentation
+     * @return -- array<int,int>, where first element is minimum count of slides, second element -- maximum
+     */
     private function compareSlidesCount($sample_pptx , $tested_pptx){
         return array(min(count($tested_pptx->getAllSlides()),count($sample_pptx->getAllSlides())),max(count($tested_pptx->getAllSlides()),count($sample_pptx->getAllSlides())));
     }
@@ -106,7 +127,11 @@ class pptxXmlAnalysis{
         return 1 - abs($diff/max(strlen($sampleText),strlen($testText)));
     }
 
-    //Получение текста со слайда
+    /*
+     * Get all text from slide
+     * @params: $slide -- slide with text
+     * @return - all text from all RichText Shapes
+     */
     private function getTextFromSlide($slide){
         $res = "";
         $shapes = $slide->getShapeCollection();
@@ -246,6 +271,13 @@ class pptxXmlAnalysis{
         return $arrayElements;
     }
 
+    /*
+     * compare two slides by slideLayouts
+     * @params $sample_slide - slide with sample slide layout
+     * $tested_slide - slide with tested slide layout
+     *
+     * @return - 0 or 1. It depends on same slide layouts or not
+     */
     private function compareSlideLayouts($sample_slide, $tested_slide){
         if($sample_slide == null || $tested_slide == null)
             return 0;
@@ -254,9 +286,59 @@ class pptxXmlAnalysis{
         return 0;
     }
 
+    private function compareParagraphs($par1, $par2){
+        $sample = $par1->getBulletStyle();
+        $test = $par2->getBulletStyle();
+        if($sample == null || $test == null){
+            return array(0,0);
+        }
+        $scored = 0;
+        if($sample->getBulletChar() == $test->getBulletChar())
+            $scored += 1;
+        if($sample->getBulletType() == $test->getBulletType())
+            $scored+=1;
+        if($sample->getBulletNumericStyle() == $test->getBulletNumericStyle() )
+            $scored += 1;
+        if($sample->getBulletNumericStartAt() == $test->getBulletNumericStartAt() )
+            $scored += 1;
+        return array($scored, 4);
+    }
+
+    private function compareParagraphsBullets($samplePptx, $analysPptx){
+        $sl1 = $this->getSlidesArray($samplePptx);
+        $sl2 = $this->getSlidesArray($analysPptx);
+        $scored = 0;
+        $max = 0;
+        for ($i = 0; $i < min(count($sl1),count($sl2)); $i++){
+            $par1 = array();
+            $par2 = array();
+            foreach($sl1[$i]->getShapeCollection() as $shape){
+                if($shape instanceof PhpOffice\PhpPresentation\Shape\RichText){
+                    $paragraphs = $shape->getParagraphs();
+                    foreach($paragraphs as $paragraph){
+                        array_push($par1, $paragraph);
+                    }
+                }
+            }
+            foreach($sl2[$i]->getShapeCollection() as $shape){
+                if($shape instanceof PhpOffice\PhpPresentation\Shape\RichText){
+                    $paragraphs = $shape->getParagraphs();
+                    foreach($paragraphs as $paragraph){
+                        array_push($par2, $paragraph);
+                    }
+                }
+            }
+            for ($j = 0; $j < min(count($par1),count($par2));$j++){
+                $tmp = $this->compareParagraphs($par1[$j], $par2[$j]);
+                $scored += $tmp[0];
+                $max += $tmp[1];
+            }
+        }
+        return array($scored,$max);
+    }
 }
-system('pip install python-pptx', $output);
 $program = new pptxXmlAnalysis();
+//echo $program->test();
 echo $program->analysis("sample.pptx", "pres.pptx");
 
 
